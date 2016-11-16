@@ -1,4 +1,5 @@
-Yshanka: Yhat ScienseOps poorman's drop-in replacement.
+`Yshanka`: Yhat ScienseOps poorman's drop-in replacement
+========================================================
 
 Installation
 ----------------
