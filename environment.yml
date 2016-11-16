@@ -1,0 +1,20 @@
+name: ushanka
+dependencies:
+  - flask
+  - sqlalchemy
+  - jinja2
+  - werkzeug
+  - pip:
+    - Flask-Migrate
+    - Flask-Admin
+    - Flask-Script
+    - Flask-SQLAlchemy
+    - Flask-Security>=1.7.5
+    - itsdangerous
+    - Mako
+    - MarkupSafe
+    - passlib
+    - pytz
+    - six
+    - wheel
+    - pyRserve
