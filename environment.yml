@@ -1,4 +1,4 @@
-name: ushanka
+name: yshanka
 dependencies:
   - flask
   - sqlalchemy

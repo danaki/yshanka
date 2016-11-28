@@ -10,10 +10,7 @@ import flask_admin
 from flask.ext.sqlalchemy import SQLAlchemy
 from flask_security import Security, SQLAlchemyUserDatastore, \
     UserMixin, RoleMixin, login_required, current_user
-from flask_restful import Api
-from flask.ext.restful import abort
 from flask.ext.migrate import Migrate
-from flask.ext.cors import CORS
 
 from app.database import db
 from app.models import *
