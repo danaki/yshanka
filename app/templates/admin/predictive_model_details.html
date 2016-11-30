@@ -1,0 +1,30 @@
+{% extends 'admin/model/details.html' %}
+
+{% block details_search %}
+{% endblock %}
+
+{% block details_table %}
+  {{model.name}}
+
+  <textarea id="chat" cols="80" rows="20"></textarea><br><br>
+{% endblock %}
+
+{% block tail %}
+  {{ super() }}
+  <script src="https://code.jquery.com/jquery-3.1.1.min.js"></script>
+  <script src="https://cdn.socket.io/socket.io-1.4.5.js"></script>
+
+  <script type="text/javascript" charset="utf-8">
+    var socket;
+    $(document).ready(function(){
+      socket = io.connect('http://' + document.domain + ':' + location.port + '/logs');
+      socket.on('connect', function() {
+          socket.emit('joined', {});
+      });
+      socket.on('message', function(data) {
+        $('#chat').val($('#chat').val() + data.msg);
+        $('#chat').scrollTop($('#chat')[0].scrollHeight);
+      });
+    });
+  </script>
+{% endblock %}

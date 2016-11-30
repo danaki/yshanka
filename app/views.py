@@ -34,10 +34,10 @@ class ApikeyField(StringField):
     def __call__(self, **kwargs):
         return super(self.__class__, self).__call__(**kwargs) + "<a href='#' onclick='javascript:$(this).prev(\"input\").val(Array.apply(0, Array(32)).map(function() { return Math.floor(Math.random() * 16).toString(16); }).join(\"\"));'>Regenerate</a>"
 
-        
+
 class UserAdminView(AdminView):
     form_overrides = dict(apikey=ApikeyField)
-    
+
     # Don't display the password on the list of Users
     column_exclude_list = list = ('password',)
 
@@ -67,4 +67,12 @@ class UserAdminView(AdminView):
             # ... then encrypt the new password prior to storing it in the database. If the password field is blank,
             # the existing password in the database will be retained.
             model.password = utils.encrypt_password(model.password2)
-            
+
+
+class PredictiveModelView(AdminView):
+    column_exclude_list = list = ('code',)
+    can_create = False
+    can_edit = False
+    can_delete = False
+    can_view_details = True
+    details_template = 'admin/predictive_model_details.html'

@@ -4,6 +4,8 @@ dependencies:
   - sqlalchemy
   - jinja2
   - werkzeug
+  - docker-py
+  - flask-socketio
   - pip:
     - Flask-Migrate
     - Flask-Admin

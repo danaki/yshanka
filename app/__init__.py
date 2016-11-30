@@ -4,6 +4,7 @@ import numpy as np
 import json
 import csv
 import io
+import docker
 from collections import OrderedDict
 
 import flask_admin
@@ -16,6 +17,7 @@ from app.database import db
 from app.models import *
 from app.views import *
 from flask_admin import helpers as admin_helpers
+from flask_socketio import SocketIO, emit, join_room, leave_room
 
 
 app = flask.Flask(__name__)
@@ -28,7 +30,9 @@ migrate = Migrate(app, db)
 user_datastore = SQLAlchemyUserDatastore(db, User, Role)
 security = Security(app, user_datastore)
 
-
+socketio = SocketIO()
+socketio.init_app(app)
+docker_thread = None
 
 @app.errorhandler(404)
 def not_found(error):
@@ -51,7 +55,7 @@ admin = flask_admin.Admin(
 # Add model views
 admin.add_view(AdminView(Role, db.session, name='Roles'))
 admin.add_view(UserAdminView(User, db.session, name='Users'))
-admin.add_view(AdminView(PredictiveModel, db.session, name='Models'))
+admin.add_view(PredictiveModelView(PredictiveModel, db.session, name='Models'))
 
 # define a context processor for merging flask-admin's template context into the
 # flask-security views.
@@ -73,10 +77,10 @@ def verify():
 def deploy_model():
     from pprint import pprint
     pprint(flask.request.form)
-    
+
     flask.request.files['model_image'].save('model_image.img')
     code = flask.request.form['code'] + '''
-    
+
 dir.create(file.path(".", "Rlib"), showWarnings = FALSE)
 .libPaths("./Rlib")
 
@@ -95,57 +99,84 @@ for (n in ls(.env, all.names=TRUE)) {
   }
 }
     '''
-    
+
     #os.remove('code.R')
     with open('code.R', 'w') as file:
         file.write(code)
-        
+
     model = PredictiveModel.query.filter_by(name = flask.request.form['modelname']).first()
     if not model:
         model = PredictiveModel(name=flask.request.form['modelname'])
 
     model.code = flask.request.form['code']
-    
+
     db.session.add(model)
     db.session.commit()
-    
+
     for p in json.loads(flask.request.form['packages'], object_pairs_hook=OrderedDict):
         dep = PredictiveModelDependency(**p)
         dep.model_id = model.id
         db.session.add(dep)
-        
+
     db.session.commit()
-    
+
     return flask.jsonify({"success": "true"})
 
 @app.route('/<user>/models/<path:model_name>', methods=['POST'])
 def model(user, model_name):
     conn = pyRserve.connect(host='localhost', port=9876)
     model_predict = getattr(conn.r, 'model.predict')
-    
+
     od = json.loads(flask.request.data.decode('utf-8'), object_pairs_hook=OrderedDict)
     delimited = io.StringIO()
     writer = csv.writer(delimited, delimiter=',')
     writer.writerow(od.keys())
     writer.writerows(zip(*[od[key] for key in od.keys()]))
     nparr = np.genfromtxt(io.BytesIO(delimited.getvalue().encode('utf-8')), dtype=None, delimiter=',', names=True, deletechars='')
-    
-    kv = []    
+
+    kv = []
     for name in od.keys():
         column = nparr[name]
-        
+
         # make pyRserve happy
         if column.dtype.type.__name__ == 'bytes_':
             column = list([str(x, 'utf-8') for x in column])
-            
+
         kv.append((np.str(str(name)), column,))
-        
+
     res = model_predict(pyRserve.TaggedList(kv))
     conn.close()
-    
+
     # make jsonify happy
     od = OrderedDict(res.astuples())
     fl = {k: v.tolist() for k, v in od.items()}
-    
+
     return flask.jsonify({'result': fl})
 
+@socketio.on('joined', namespace='/logs')
+def joined(message):
+    global docker_thread
+
+    @flask.copy_current_request_context
+    def background_thread(room):
+        dc_args = docker.utils.kwargs_from_env(assert_hostname=False)
+        print("Connecting docker")
+        dc = docker.Client(**dc_args)
+        print("Connected")
+
+        while True:
+            line = ''
+            for s in dc.logs(container='desperate_booth',
+                             stdout=True,
+                             stderr=True,
+                             timestamps=True,
+                             stream=True):
+                line += s
+                if s == '\n':
+                    emit('message', {'msg': line}, room=room, namespace='/logs')
+                    line = ''
+
+    join_room('desperate_booth')
+
+    if docker_thread is None:
+        docker_thread = socketio.start_background_task(background_thread, 'desperate_booth')
