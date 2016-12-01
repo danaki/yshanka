@@ -157,20 +157,21 @@ def model(user, model_name):
 def joined(message):
     global docker_thread
 
-    @flask.copy_current_request_context
-    def background_thread(room):
-        dc_args = docker.utils.kwargs_from_env(assert_hostname=False)
-        print("Connecting docker")
-        dc = docker.Client(**dc_args)
-        print("Connected")
+    room = 'desperate_booth'
+    dc_args = docker.utils.kwargs_from_env(assert_hostname=False)
+    dc = docker.Client(**dc_args)
+    print("Connected docker")
 
+    @flask.copy_current_request_context
+    def background_thread():
         while True:
             line = ''
             for s in dc.logs(container='desperate_booth',
                              stdout=True,
                              stderr=True,
                              timestamps=True,
-                             stream=True):
+                             stream=True,
+                             tail=0):
                 line += s
                 if s == '\n':
                     emit('message', {'msg': line}, room=room, namespace='/logs')
@@ -178,5 +179,14 @@ def joined(message):
 
     join_room('desperate_booth')
 
+    history = dc.logs(container='desperate_booth',
+                 stdout=True,
+                 stderr=True,
+                 timestamps=True,
+                 stream=False,
+                 tail="all")
+
+    emit('message', {'msg': history}, room=room, namespace='/logs')
+
     if docker_thread is None:
-        docker_thread = socketio.start_background_task(background_thread, 'desperate_booth')
+        docker_thread = socketio.start_background_task(background_thread)
