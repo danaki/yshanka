@@ -19,6 +19,8 @@ from app.views import *
 from flask_admin import helpers as admin_helpers
 from flask_socketio import SocketIO, emit, join_room, leave_room
 
+import eventlet
+eventlet.monkey_patch()
 
 app = flask.Flask(__name__)
 app.config.from_object('config')
@@ -30,9 +32,31 @@ migrate = Migrate(app, db)
 user_datastore = SQLAlchemyUserDatastore(db, User, Role)
 security = Security(app, user_datastore)
 
-socketio = SocketIO()
-socketio.init_app(app)
+socketio = SocketIO(app, async_mode='eventlet')
 docker_thread = None
+
+statuses = {}
+def get_container_statuses():
+    global statuses
+    import time
+
+    room = 'desperate_booth'
+    dc_args = docker.utils.kwargs_from_env(assert_hostname=False)
+    dc = docker.Client(**dc_args)
+
+    while True:
+        statuses = {}
+        for container in dc.containers():
+            statuses[container['Names'][0]] = container['State']
+
+        print("*** sengind " + statuses.get('/desperate_booth', 'Unknown'))
+        with app.app_context():
+            emit('statuses', {'msg': statuses.get('/desperate_booth', 'Unknown')}, room=room, namespace='/logs')
+
+        socketio.sleep(5)
+
+status_thread = socketio.start_background_task(get_container_statuses)
+
 
 @app.errorhandler(404)
 def not_found(error):
@@ -153,8 +177,16 @@ def model(user, model_name):
 
     return flask.jsonify({'result': fl})
 
-@socketio.on('joined', namespace='/logs')
-def joined(message):
+@socketio.on('joined_statuses', namespace='/logs')
+def joined_statuses(message):
+    global statuses
+    room = 'desperate_booth'
+    join_room('desperate_booth')
+
+    emit('statuses', {'msg': statuses.get('/desperate_booth', 'Unknown')}, room=room, namespace='/logs')
+
+@socketio.on('joined_logs', namespace='/logs')
+def joined_logs(message):
     global docker_thread
 
     room = 'desperate_booth'
@@ -174,7 +206,7 @@ def joined(message):
                              tail=0):
                 line += s
                 if s == '\n':
-                    emit('message', {'msg': line}, room=room, namespace='/logs')
+                    emit('logs', {'msg': line}, room=room, namespace='/logs')
                     line = ''
 
     join_room('desperate_booth')
@@ -186,7 +218,7 @@ def joined(message):
                  stream=False,
                  tail="all")
 
-    emit('message', {'msg': history}, room=room, namespace='/logs')
+    emit('logs', {'msg': history}, room=room, namespace='/logs')
 
     if docker_thread is None:
         docker_thread = socketio.start_background_task(background_thread)

@@ -1,10 +1,9 @@
 from flask_security import current_user, utils
-from flask import url_for, redirect, render_template, request, abort
+from flask import url_for, redirect, render_template, request, abort, Markup
 from flask_admin.contrib import sqla
 from wtforms.fields import PasswordField, StringField
 from wtforms.widgets import Input
 
-# Create customized model view class
 class AdminView(sqla.ModelView):
 
     def is_accessible(self):
@@ -68,7 +67,6 @@ class UserAdminView(AdminView):
             # the existing password in the database will be retained.
             model.password = utils.encrypt_password(model.password2)
 
-
 class PredictiveModelView(AdminView):
     column_exclude_list = list = ('code',)
     can_create = False
@@ -76,3 +74,11 @@ class PredictiveModelView(AdminView):
     can_delete = False
     can_view_details = True
     details_template = 'admin/predictive_model_details.html'
+    list_template = 'admin/predictive_model_list.html'
+
+    def _name_formatter(view, context, model, name):
+        return Markup('{} <span class="label label-default" id="status"></span>'.format(model.name))
+
+    column_formatters = {
+       'name': _name_formatter
+    }

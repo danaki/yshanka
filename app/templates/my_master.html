@@ -5,14 +5,14 @@
         .navbar-header .navbar-brand {
             padding-left: 80px;
         }
-        
+
         .navbar-header .navbar-brand {
             background: url({{ url_for('static', filename='logo.png') }});
             background-size: 80px 60px;
             background-repeat: no-repeat;
         }
     </style>
-{% endblock %}  
+{% endblock %}
 {% block brand %}
     <a class="navbar-brand" href="{{ admin_view.admin.url }}">{{ admin_view.admin.name }}</a>
 {% endblock %}
@@ -32,4 +32,10 @@
     </ul>
 </div>
 {% endif %}
+{% endblock %}
+
+{% block tail %}
+  {{ super() }}
+  <script src="https://code.jquery.com/jquery-3.1.1.min.js"></script>
+  <script src="https://cdn.socket.io/socket.io-1.4.5.js"></script>
 {% endblock %}

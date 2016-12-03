@@ -6,6 +6,7 @@ dependencies:
   - werkzeug
   - docker-py
   - flask-socketio
+  - eventlet
   - pip:
     - Flask-Migrate
     - Flask-Admin

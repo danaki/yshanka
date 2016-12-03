@@ -5,6 +5,7 @@ DEBUG = True
 
 SQLALCHEMY_DATABASE_URI = 'sqlite:///' + os.path.join(BASE_DIR, 'db.sqlite')
 DATABASE_CONNECT_OPTIONS = {}
+SQLALCHEMY_TRACK_MODIFICATIONS = False
 
 SECRET_KEY = "9oup6z5mdbw)8(f5$9ob@m&xha*(5ulqot&x*y1n$1^^9qo#d-"
 

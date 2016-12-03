@@ -1,13 +1,4 @@
-{% extends 'admin/model/details.html' %}
-
-{% block details_search %}
-{% endblock %}
-
-{% block details_table %}
-  <h3>{{model.name}} <span class="label label-default" id="status">Unknown</span></h3>
-
-  <textarea id="chat" cols="80" rows="20"></textarea><br><br>
-{% endblock %}
+{% extends 'admin/model/list.html' %}
 
 {% block tail %}
   {{ super() }}
@@ -16,12 +7,7 @@
     $(document).ready(function(){
       socket = io.connect('http://' + document.domain + ':' + location.port + '/logs');
       socket.on('connect', function() {
-          socket.emit('joined_logs', {});
           socket.emit('joined_statuses', {});
-      });
-      socket.on('logs', function(data) {
-        $('#chat').val($('#chat').val() + data.msg);
-        $('#chat').scrollTop($('#chat')[0].scrollHeight);
       });
       socket.on('statuses', function(data) {
         console.log('received ' + data.msg)
