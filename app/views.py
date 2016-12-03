@@ -1,8 +1,11 @@
 from flask_security import current_user, utils
-from flask import url_for, redirect, render_template, request, abort, Markup
+from flask import url_for, redirect, render_template, request, abort, Markup, flash
 from flask_admin.contrib import sqla
+from flask_admin.actions import action
 from wtforms.fields import PasswordField, StringField
 from wtforms.widgets import Input
+from app.models import PredictiveModel
+from app.docker_client import *
 
 class AdminView(sqla.ModelView):
 
@@ -82,3 +85,20 @@ class PredictiveModelView(AdminView):
     column_formatters = {
        'name': _name_formatter
     }
+
+    @action('restart', 'Restart', 'Are you sure you want to restart selected models?')
+    def action_restart(self, ids):
+        try:
+            query = PredictiveModel.query.filter(PredictiveModel.id.in_(ids))
+
+            count = 0
+            for model in query.all():
+                count += 1
+
+            flash('{count}s models were successfully approved.'.format(count=count))
+
+        except Exception as ex:
+            if not self.handle_view_exception(ex):
+                raise
+
+            flash('Failed to restart models. {error}'.format(str(ex)), 'error')

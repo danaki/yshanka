@@ -4,7 +4,6 @@ import numpy as np
 import json
 import csv
 import io
-import docker
 from collections import OrderedDict
 
 import flask_admin
@@ -16,6 +15,7 @@ from flask.ext.migrate import Migrate
 from app.database import db
 from app.models import *
 from app.views import *
+from app.docker_client import *
 from flask_admin import helpers as admin_helpers
 from flask_socketio import SocketIO, emit, join_room, leave_room
 
@@ -41,15 +41,12 @@ def get_container_statuses():
     import time
 
     room = 'desperate_booth'
-    dc_args = docker.utils.kwargs_from_env(assert_hostname=False)
-    dc = docker.Client(**dc_args)
 
     while True:
         statuses = {}
-        for container in dc.containers():
+        for container in docker_client.containers():
             statuses[container['Names'][0]] = container['State']
 
-        print("*** sengind " + statuses.get('/desperate_booth', 'Unknown'))
         with app.app_context():
             emit('statuses', {'msg': statuses.get('/desperate_booth', 'Unknown')}, room=room, namespace='/logs')
 
@@ -190,15 +187,12 @@ def joined_logs(message):
     global docker_thread
 
     room = 'desperate_booth'
-    dc_args = docker.utils.kwargs_from_env(assert_hostname=False)
-    dc = docker.Client(**dc_args)
-    print("Connected docker")
 
     @flask.copy_current_request_context
     def background_thread():
         while True:
             line = ''
-            for s in dc.logs(container='desperate_booth',
+            for s in docker_client.logs(container='desperate_booth',
                              stdout=True,
                              stderr=True,
                              timestamps=True,
@@ -211,7 +205,7 @@ def joined_logs(message):
 
     join_room('desperate_booth')
 
-    history = dc.logs(container='desperate_booth',
+    history = docker_client.logs(container='desperate_booth',
                  stdout=True,
                  stderr=True,
                  timestamps=True,
