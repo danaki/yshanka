@@ -44,11 +44,17 @@ def get_container_statuses():
 
     while True:
         statuses = {}
-        for container in docker_client.containers():
-            statuses[container['Names'][0]] = container['State']
+        for container in docker_client.containers(all=True):
+            name = container['Names'][0].replace('/', '')
+            stats = docker_client.stats(name, decode=False, stream=False)
+
+            statuses[name] = dict(
+                state=container['State'],
+                stats=stats
+            )
 
         with app.app_context():
-            emit('statuses', {'msg': statuses.get('/desperate_booth', 'Unknown')}, room=room, namespace='/logs')
+            emit('statuses', {'msg': statuses.get('desperate_booth', {})}, room=room, namespace='/logs')
 
         socketio.sleep(5)
 
@@ -180,7 +186,7 @@ def joined_statuses(message):
     room = 'desperate_booth'
     join_room('desperate_booth')
 
-    emit('statuses', {'msg': statuses.get('/desperate_booth', 'Unknown')}, room=room, namespace='/logs')
+    emit('statuses', {'msg': statuses.get('desperate_booth', {})}, room=room, namespace='/logs')
 
 @socketio.on('joined_logs', namespace='/logs')
 def joined_logs(message):

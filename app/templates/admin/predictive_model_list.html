@@ -10,12 +10,23 @@
           socket.emit('joined_statuses', {});
       });
       socket.on('statuses', function(data) {
-        console.log('received ' + data.msg)
-        $('#status').text(data.msg)
-        if (data.msg.toLowerCase() == 'running') {
-          $('#status').removeClass('label-default').addClass('label-success');
-        } else {
-          $('#status').removeClass('label-success').addClass('label-default');
+        state = data.msg.state;
+        stats = data.msg.stats;
+        if (state != null) {
+
+          $('#status').text(state);
+          console.dir(data);
+          if (state.toLowerCase() == 'running') {
+            $('#status').removeClass('label-default').addClass('label-success');
+
+            var cpuDelta = stats.cpu_stats.cpu_usage.total_usage - stats.precpu_stats.cpu_usage.total_usage;
+            var systemDelta = stats.cpu_stats.system_cpu_usage - stats.precpu_stats.system_cpu_usage;
+            $('#cpu').text(Math.round(cpuDelta / systemDelta * 100) + '%');
+            $('#mem').text(Math.round(stats.memory_stats.usage / 1024 / 1024) + ' MB');
+
+          } else {
+            $('#status').removeClass('label-success').addClass('label-default');
+          }
         }
       });
 
