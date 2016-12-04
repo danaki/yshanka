@@ -80,7 +80,7 @@ class PredictiveModelView(AdminView):
     list_template = 'admin/predictive_model_list.html'
 
     def _name_formatter(view, context, model, name):
-        return Markup('{} <span class="label label-default" id="status"></span> CPU: <span class="badge" id="cpu"></span> MEM: <span class="badge" id="mem"></span>'.format(model.name))
+        return Markup('{} <span class="label label-default" id="status"></span> <span class="badge" id="cpu"></span> <span class="badge" id="mem"></span>'.format(model.name))
 
     column_formatters = {
        'name': _name_formatter

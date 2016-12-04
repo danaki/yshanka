@@ -21,8 +21,8 @@
 
             var cpuDelta = stats.cpu_stats.cpu_usage.total_usage - stats.precpu_stats.cpu_usage.total_usage;
             var systemDelta = stats.cpu_stats.system_cpu_usage - stats.precpu_stats.system_cpu_usage;
-            $('#cpu').text(Math.round(cpuDelta / systemDelta * 100) + '%');
-            $('#mem').text(Math.round(stats.memory_stats.usage / 1024 / 1024) + ' MB');
+            $('#cpu').text('CPU: ' + Math.round(cpuDelta / systemDelta * 100) + '%');
+            $('#mem').text('Mem: ' + Math.round(stats.memory_stats.usage / 1024 / 1024) + ' MB');
 
           } else {
             $('#status').removeClass('label-success').addClass('label-default');
