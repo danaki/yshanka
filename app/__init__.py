@@ -1,9 +1,12 @@
+from __future__ import print_function
+
 import flask
 import pyRserve
 import numpy as np
 import json
 import csv
 import io
+import os
 from collections import OrderedDict
 
 import flask_admin
@@ -21,6 +24,8 @@ from flask_socketio import SocketIO, emit, join_room, leave_room
 
 import eventlet
 eventlet.monkey_patch()
+
+APP_ROOT = os.path.dirname(os.path.abspath(__file__))
 
 app = flask.Flask(__name__)
 app.config.from_object('config')
@@ -45,8 +50,12 @@ def get_container_statuses():
     while True:
         statuses = {}
         for container in docker_client.containers(all=True):
+            print(container['Ports'])
             name = container['Names'][0].replace('/', '')
-            stats = docker_client.stats(name, decode=False, stream=False)
+            try:
+                stats = docker_client.stats(name, decode=False, stream=False)
+            except ValueError:
+                stats = {}
 
             statuses[name] = dict(
                 state=container['State'],
@@ -105,31 +114,15 @@ def deploy_model():
     from pprint import pprint
     pprint(flask.request.form)
 
-    flask.request.files['model_image'].save('model_image.img')
-    code = flask.request.form['code'] + '''
+    modelname = flask.request.form['modelname']
 
-dir.create(file.path(".", "Rlib"), showWarnings = FALSE)
-.libPaths("./Rlib")
+    #deps_file = '/tmp/{}_deps.R'.format(modelname)
+    #model_file = '/tmp/{}.Rdata'.format(modelname)
 
-# functions defined in 'code' must not be overriden by the saved image
-.all_objects = ls()
-.all_funcs <- .all_objects[lapply(.all_objects, function(name){
-       class(globalenv()[[name]])
-   }) == "function"]
+    model_file = flask.request.files['model_image']
 
-.env <- new.env()
-load('model_image.img', envir=.env)
-
-for (n in ls(.env, all.names=TRUE)) {
-  if (! n %in% .all_funcs) {
-    assign(n, get(n, .env), .GlobalEnv)
-  }
-}
-    '''
-
-    #os.remove('code.R')
-    with open('code.R', 'w') as file:
-        file.write(code)
+    #flask.request.files['model_image'].save(model_file)
+    code = flask.request.form['code']
 
     model = PredictiveModel.query.filter_by(name = flask.request.form['modelname']).first()
     if not model:
@@ -140,12 +133,59 @@ for (n in ls(.env, all.names=TRUE)) {
     db.session.add(model)
     db.session.commit()
 
+    deps_file = ''
     for p in json.loads(flask.request.form['packages'], object_pairs_hook=OrderedDict):
         dep = PredictiveModelDependency(**p)
         dep.model_id = model.id
         db.session.add(dep)
+        if p['install'] == 'true':
+            deps += "install.packages('{}');\n".format(p['importName'])
 
     db.session.commit()
+
+    import tarfile
+    import tempfile
+
+    template_dir = os.path.realpath(APP_ROOT + '/../worker/')
+    f = tempfile.NamedTemporaryFile()
+
+    t = tarfile.open(mode='w', fileobj=f)
+
+    abs_path = os.path.abspath(template_dir)
+    t.add(abs_path, arcname='.', recursive=True)
+    t.addfile(tarfile.TarInfo("env.Rdata"), model_file)
+    t.addfile(tarfile.TarInfo("deps.R"), io.BytesIO(deps_file.encode('utf-8')))
+
+    t.close()
+    f.seek(0)
+
+    @flask.copy_current_request_context
+    def background_thread(modelname, dockerfile):
+        image = 'yshan:' + modelname
+        containers = docker_client.containers(all=True, filters=dict(name=modelname))
+        if len(containers) > 0:
+            print("Removing and stoping previous " + modelname)
+            docker_client.stop(modelname, timeout=0)
+            docker_client.remove_container(modelname, force=True)
+            docker_client.remove_image(image, force=True)
+
+        for line in docker_client.build(fileobj=f, rm=True, tag=image, custom_context=True):
+            out = flask.json.loads(line)
+            if 'error' in out:
+                print(out['errorDetail'], end="")
+                return
+            print(out['stream'], end="")
+
+        container = docker_client.create_container(
+            image,
+            detach=True,
+            name=modelname,
+            host_config=docker_client.create_host_config(port_bindings={
+                6311: ('0.0.0.0',)
+            }))
+        print(docker_client.start(container=container.get('Id')))
+
+    socketio.start_background_task(background_thread, modelname, f)
 
     return flask.jsonify({"success": "true"})
 

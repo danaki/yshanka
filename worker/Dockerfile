@@ -16,6 +16,7 @@ RUN echo "/usr/lib/R" > /etc/container_environment/R_HOME
 
 ADD Rserve.conf /root
 ADD bootstrap.R /root
+ADD env.Rdata /root
+ADD deps.R /root
 
 EXPOSE 6311
-

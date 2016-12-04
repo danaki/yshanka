@@ -4,3 +4,5 @@ local({
   options(repos = r)
 })
 
+load("/root/env.RData")
+source("/root/deps.R")

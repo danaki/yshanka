@@ -74,7 +74,7 @@ class PredictiveModelView(AdminView):
     column_exclude_list = list = ('code',)
     can_create = False
     can_edit = False
-    can_delete = False
+    can_delete = True
     can_view_details = True
     details_template = 'admin/predictive_model_details.html'
     list_template = 'admin/predictive_model_list.html'
