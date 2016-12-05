@@ -4,7 +4,13 @@
 {% endblock %}
 
 {% block details_table %}
-  <h3>{{model.name}} <span class="label label-default" id="status">Unknown</span></h3>
+  <h3>{{model.name}}
+    <span class="label label-default" id="{{model.name}}-state"></span>
+    <span id="{{model.name}}-stats">
+        <span class="badge cpu"></span>
+        <span class="badge mem"></span>
+    </span>
+  </h3>
 
   <textarea id="logs" rows="20" class="form-control" style="min-width: 100%"></textarea><br><br>
 {% endblock %}
@@ -16,25 +22,12 @@
     $(document).ready(function(){
       socket = io.connect('http://' + document.domain + ':' + location.port + '/logs');
       socket.on('connect', function() {
-          socket.emit('joined_logs', {});
-          socket.emit('joined_statuses', {});
-      });
-      socket.on('logs', function(data) {
-        $('#logs').val($('#logs').val() + data.msg);
-        $('#logs').scrollTop($('#logs')[0].scrollHeight);
-      });
-      socket.on('statuses', function(data) {
-        state = data.msg.state;
-        if (state != null) {
-          $('#status').text(state);
-          if (state.toLowerCase() == 'running') {
-            $('#status').removeClass('label-default').addClass('label-success');
-          } else {
-            $('#status').removeClass('label-success').addClass('label-default');
-          }
-        }
+          socket.emit('joined_logs', {model_name: '{{model.name}}'});
+          socket.emit('joined_stats', {});
+          socket.emit('joined_states', {});
       });
 
+      {% include 'admin/socket_handlers.html' %}
     });
   </script>
 {% endblock %}

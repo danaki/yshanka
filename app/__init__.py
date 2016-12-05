@@ -6,10 +6,20 @@ import numpy as np
 import json
 import csv
 import io
+import re
 import os
-from collections import OrderedDict
-
+import time
+import tarfile
+import tempfile
 import flask_admin
+import eventlet
+import docker
+import requests
+
+from flask_admin import helpers as admin_helpers
+from flask_socketio import SocketIO, emit, join_room, leave_room
+
+from collections import OrderedDict
 from flask.ext.sqlalchemy import SQLAlchemy
 from flask_security import Security, SQLAlchemyUserDatastore, \
     UserMixin, RoleMixin, login_required, current_user
@@ -19,10 +29,8 @@ from app.database import db
 from app.models import *
 from app.views import *
 from app.docker_client import *
-from flask_admin import helpers as admin_helpers
-from flask_socketio import SocketIO, emit, join_room, leave_room
 
-import eventlet
+
 eventlet.monkey_patch()
 
 APP_ROOT = os.path.dirname(os.path.abspath(__file__))
@@ -40,34 +48,82 @@ security = Security(app, user_datastore)
 socketio = SocketIO(app, async_mode='eventlet')
 docker_thread = None
 
-statuses = {}
-def get_container_statuses():
-    global statuses
-    import time
+model_containers = {}
 
-    room = 'desperate_booth'
+def send_history(container):
+    print("send_history " + container)
+    history = docker_client.logs(
+        container=container,
+        stdout=True,
+        stderr=True,
+        timestamps=True,
+        stream=False,
+        tail="all")
 
+    with app.app_context():
+        emit('logs', dict(logs=history, clear=True), room='logs_' + container, namespace='/logs')
+
+def start_background_task(f, *args, **kwargs):
+    return eventlet.spawn(f, *args, **kwargs)
+
+def stream_logs(container):
     while True:
-        statuses = {}
-        for container in docker_client.containers(all=True):
-            print(container['Ports'])
-            name = container['Names'][0].replace('/', '')
-            try:
-                stats = docker_client.stats(name, decode=False, stream=False)
-            except ValueError:
-                stats = {}
+        send_history(container)
+        # since = time.time()
+        try:
+            print("Stream logs " + container)
+            line = ''
+            for s in docker_client.logs(container=container,
+                             stdout=True,
+                             stderr=True,
+                             timestamps=True,
+                             stream=True,
+                             tail=0):
+                line += s
+                if line.endswith('\n'):
+                    with app.app_context():
+                        #print("sent line " + len(line))
+                        emit('logs', dict(logs=line), room='logs_' + container, namespace='/logs')
+                    line = ''
+                    since = time.time()
 
-            statuses[name] = dict(
-                state=container['State'],
-                stats=stats
-            )
+        except (requests.exceptions.ConnectionError, docker.errors.NotFound) as e:
+            print("Logs ConnectionError: " + container + ' ' + str(e))
 
-        with app.app_context():
-            emit('statuses', {'msg': statuses.get('desperate_booth', {})}, room=room, namespace='/logs')
+def stream_stats(container):
+    while True:
+        try:
+            print("Stream stats " + container)
+            for s in docker_client.stats(container, decode=True, stream=True):
+                with app.app_context():
+                    emit('stats', {'model_name': container, 'stats': s}, room='stats', namespace='/logs')
+        except (requests.exceptions.ConnectionError, docker.errors.NotFound) as e:
+            print("Stats ConnectionError" + container + ' ' + str(e))
 
-        socketio.sleep(5)
+def stream_states():
+    print("stream_states")
+    while True:
+        # TODO: stop monitoring if container not in the list or stoped
+        for c in docker_client.containers(all=True):
+            rserve_ports = [p['PublicPort'] for p in c['Ports'] if p['PrivatePort'] == 6311]
+            if len(rserve_ports) == 0:
+                break
 
-status_thread = socketio.start_background_task(get_container_statuses)
+            model_name = c['Names'][0].replace('/', '')
+
+            if not model_name in model_containers:
+                print("Starting "+ model_name)
+                model_containers[model_name] = dict(
+                    logs_thread=start_background_task(stream_logs, model_name),
+                    stats_thread=start_background_task(stream_stats, model_name),
+                    port=rserve_ports[0])
+
+            with app.app_context():
+                emit('states', {'model_name': model_name, 'state': c['State']}, room='states', namespace='/logs')
+
+        socketio.sleep(1)
+
+status_thread = start_background_task(stream_states)
 
 
 @app.errorhandler(404)
@@ -114,11 +170,7 @@ def deploy_model():
     from pprint import pprint
     pprint(flask.request.form)
 
-    modelname = flask.request.form['modelname']
-
-    #deps_file = '/tmp/{}_deps.R'.format(modelname)
-    #model_file = '/tmp/{}.Rdata'.format(modelname)
-
+    model_name = flask.request.form['modelname']
     model_file = flask.request.files['model_image']
 
     #flask.request.files['model_image'].save(model_file)
@@ -133,65 +185,79 @@ def deploy_model():
     db.session.add(model)
     db.session.commit()
 
-    deps_file = ''
+    deps = ''
     for p in json.loads(flask.request.form['packages'], object_pairs_hook=OrderedDict):
         dep = PredictiveModelDependency(**p)
         dep.model_id = model.id
         db.session.add(dep)
-        if p['install'] == 'true':
+        if p['install']:
             deps += "install.packages('{}');\n".format(p['importName'])
 
     db.session.commit()
-
-    import tarfile
-    import tempfile
-
     template_dir = os.path.realpath(APP_ROOT + '/../worker/')
     f = tempfile.NamedTemporaryFile()
 
     t = tarfile.open(mode='w', fileobj=f)
 
     abs_path = os.path.abspath(template_dir)
+
     t.add(abs_path, arcname='.', recursive=True)
-    t.addfile(tarfile.TarInfo("env.Rdata"), model_file)
-    t.addfile(tarfile.TarInfo("deps.R"), io.BytesIO(deps_file.encode('utf-8')))
+
+    info = tarfile.TarInfo("env.RData")
+    model_file.seek(0, os.SEEK_END)
+    info.size = model_file.tell()
+    model_file.seek(0)
+    t.addfile(info, model_file)
+
+    info = tarfile.TarInfo("deps.R")
+    info.size = len(deps)
+    t.addfile(info, io.BytesIO(deps.encode('utf-8')))
 
     t.close()
     f.seek(0)
 
     @flask.copy_current_request_context
-    def background_thread(modelname, dockerfile):
-        image = 'yshan:' + modelname
-        containers = docker_client.containers(all=True, filters=dict(name=modelname))
+    def releaser_thread(model_name, dockerfile):
+        image = 'yshan:' + model_name
+        containers = docker_client.containers(all=True, filters=dict(name=model_name))
         if len(containers) > 0:
-            print("Removing and stoping previous " + modelname)
-            docker_client.stop(modelname, timeout=0)
-            docker_client.remove_container(modelname, force=True)
+            print("Removing and stoping previous " + model_name)
+            docker_client.stop(model_name, timeout=0)
+            docker_client.remove_container(model_name, force=True)
             docker_client.remove_image(image, force=True)
 
         for line in docker_client.build(fileobj=f, rm=True, tag=image, custom_context=True):
             out = flask.json.loads(line)
-            if 'error' in out:
-                print(out['errorDetail'], end="")
-                return
+            if not 'stream' in out:
+                print(out)
             print(out['stream'], end="")
 
         container = docker_client.create_container(
             image,
             detach=True,
-            name=modelname,
+            name=model_name,
             host_config=docker_client.create_host_config(port_bindings={
                 6311: ('0.0.0.0',)
             }))
-        print(docker_client.start(container=container.get('Id')))
+        docker_client.start(container=container.get('Id'))
 
-    socketio.start_background_task(background_thread, modelname, f)
+        if model_name in model_containers:
+            eventlet.greenthread.kill(model_containers[model_name]['logs_thread'])
+            eventlet.greenthread.kill(model_containers[model_name]['stats_thread'])
+            print("Kill sent " + model_name)
+            del model_containers[model_name]
+
+    start_background_task(releaser_thread, model_name, f)
 
     return flask.jsonify({"success": "true"})
 
-@app.route('/<user>/models/<path:model_name>', methods=['POST'])
-def model(user, model_name):
-    conn = pyRserve.connect(host='localhost', port=9876)
+@app.route('/<user>/models/<path:model_name>/', methods=['POST'])
+def call_model(user, model_name):
+    host = re.search('(?:http.*://)?(?P<host>[^:/ ]+).?(?P<port>[0-9]*).*', docker_client.base_url).group('host')
+    port = model_containers[model_name]['port']
+    print(dict(host=host, port=port))
+
+    conn = pyRserve.connect(host=host, port=port)
     model_predict = getattr(conn.r, 'model.predict')
 
     od = json.loads(flask.request.data.decode('utf-8'), object_pairs_hook=OrderedDict)
@@ -220,45 +286,17 @@ def model(user, model_name):
 
     return flask.jsonify({'result': fl})
 
-@socketio.on('joined_statuses', namespace='/logs')
+@socketio.on('joined_states', namespace='/logs')
 def joined_statuses(message):
-    global statuses
-    room = 'desperate_booth'
-    join_room('desperate_booth')
+    join_room('states')
 
-    emit('statuses', {'msg': statuses.get('desperate_booth', {})}, room=room, namespace='/logs')
+@socketio.on('joined_stats', namespace='/logs')
+def joined_statuses(message):
+    join_room('stats')
 
 @socketio.on('joined_logs', namespace='/logs')
 def joined_logs(message):
-    global docker_thread
+    room = 'logs_' + message['model_name']
+    join_room(room)
 
-    room = 'desperate_booth'
-
-    @flask.copy_current_request_context
-    def background_thread():
-        while True:
-            line = ''
-            for s in docker_client.logs(container='desperate_booth',
-                             stdout=True,
-                             stderr=True,
-                             timestamps=True,
-                             stream=True,
-                             tail=0):
-                line += s
-                if s == '\n':
-                    emit('logs', {'msg': line}, room=room, namespace='/logs')
-                    line = ''
-
-    join_room('desperate_booth')
-
-    history = docker_client.logs(container='desperate_booth',
-                 stdout=True,
-                 stderr=True,
-                 timestamps=True,
-                 stream=False,
-                 tail="all")
-
-    emit('logs', {'msg': history}, room=room, namespace='/logs')
-
-    if docker_thread is None:
-        docker_thread = socketio.start_background_task(background_thread)
+    send_history(message['model_name'])

@@ -4,32 +4,14 @@
   {{ super() }}
   <script type="text/javascript" charset="utf-8">
     var socket;
-    $(document).ready(function(){
+    $(document).ready(function() {
       socket = io.connect('http://' + document.domain + ':' + location.port + '/logs');
       socket.on('connect', function() {
-          socket.emit('joined_statuses', {});
-      });
-      socket.on('statuses', function(data) {
-        state = data.msg.state;
-        stats = data.msg.stats;
-        if (state != null) {
-
-          $('#status').text(state);
-          console.dir(data);
-          if (state.toLowerCase() == 'running') {
-            $('#status').removeClass('label-default').addClass('label-success');
-
-            var cpuDelta = stats.cpu_stats.cpu_usage.total_usage - stats.precpu_stats.cpu_usage.total_usage;
-            var systemDelta = stats.cpu_stats.system_cpu_usage - stats.precpu_stats.system_cpu_usage;
-            $('#cpu').text('CPU: ' + Math.round(cpuDelta / systemDelta * 100) + '%');
-            $('#mem').text('Mem: ' + Math.round(stats.memory_stats.usage / 1024 / 1024) + ' MB');
-
-          } else {
-            $('#status').removeClass('label-success').addClass('label-default');
-          }
-        }
+          socket.emit('joined_states', {});
+          socket.emit('joined_stats', {});
       });
 
+      {% include 'admin/socket_handlers.html' %}
     });
   </script>
 {% endblock %}

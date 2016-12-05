@@ -1,0 +1,33 @@
+
+socket.on('states', function(data) {
+  model_name = data.model_name
+  state = data.state;
+  id = '#' + model_name + '-state'
+
+  $(id).text(state);
+
+  if (state.toLowerCase() == 'running') {
+    $(id).removeClass('label-default').addClass('label-success');
+  } else {
+    $(id).removeClass('label-success').addClass('label-default');
+  }
+});
+
+socket.on('stats', function(data) {
+  model_name = data.model_name
+  stats = data.stats;
+  id = '#' + model_name + '-stats'
+  var cpuDelta = stats.cpu_stats.cpu_usage.total_usage - stats.precpu_stats.cpu_usage.total_usage;
+  var systemDelta = stats.cpu_stats.system_cpu_usage - stats.precpu_stats.system_cpu_usage;
+  $(id + ' .cpu').text('CPU: ' + Math.round(cpuDelta / systemDelta * 100) + '%');
+  $(id + ' .mem').text('Mem: ' + Math.round(stats.memory_stats.usage / 1024 / 1024) + ' MB');
+});
+
+socket.on('logs', function(data) {
+  if ('clear' in data && data.clear) {
+    $('#logs').val('');
+  }
+
+  $('#logs').val($('#logs').val() + data.logs);
+  $('#logs').scrollTop($('#logs')[0].scrollHeight);
+});

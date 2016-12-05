@@ -1,20 +1,22 @@
 {% extends 'admin/base.html' %}
-{% block head_css %}
-    {{ super() }}
-    <style>
-        .navbar-header .navbar-brand {
-            padding-left: 80px;
-        }
 
-        .navbar-header .navbar-brand {
-            background: url({{ url_for('static', filename='logo.png') }});
-            background-size: 80px 60px;
-            background-repeat: no-repeat;
-        }
-    </style>
+{% block head_css %}
+  {{ super() }}
+  <style>
+    .navbar-header .navbar-brand {
+      padding-left: 80px;
+    }
+
+    .navbar-header .navbar-brand {
+      background: url({{ url_for('static', filename='logo.png') }});
+      background-size: 80px 60px;
+      background-repeat: no-repeat;
+    }
+  </style>
 {% endblock %}
+
 {% block brand %}
-    <a class="navbar-brand" href="{{ admin_view.admin.url }}">{{ admin_view.admin.name }}</a>
+  <a class="navbar-brand" href="{{ admin_view.admin.url }}">{{ admin_view.admin.name }}</a>
 {% endblock %}
 
 {% block access_control %}
