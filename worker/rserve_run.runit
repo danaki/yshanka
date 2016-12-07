@@ -1,2 +1,2 @@
 #!/bin/sh
-exec /usr/lib/R/bin/Rserve --RS-enable-remote --RS-port 6311 --RS-conf /root/Rserve.conf --RS-source /root/bootstrap.R --vanilla --quiet --default-packages=utils,stats
+exec /usr/lib/R/bin/Rserve --RS-enable-remote --RS-port 6311 --RS-conf /root/Rserve.conf --RS-source /root/bootstrap.R --vanilla --default-packages=utils,stats

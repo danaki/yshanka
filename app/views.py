@@ -82,6 +82,7 @@ class PredictiveModelView(AdminView):
     def _name_formatter(view, context, model, name):
         return Markup("""
         {model_name} <span class="label label-default" id="{model_name}-state"></span>
+        <span class="label label-info" id="{model_name}-model_state"></span>
         <span id="{model_name}-stats">
             <span class="badge cpu"></span>
             <span class="badge mem"></span>

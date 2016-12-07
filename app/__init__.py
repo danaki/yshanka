@@ -8,7 +8,6 @@ import csv
 import io
 import re
 import os
-import time
 import tarfile
 import tempfile
 import flask_admin
@@ -19,7 +18,7 @@ import requests
 from flask_admin import helpers as admin_helpers
 from flask_socketio import SocketIO, emit, join_room, leave_room
 
-from collections import OrderedDict
+from collections import OrderedDict, Iterable
 from flask.ext.sqlalchemy import SQLAlchemy
 from flask_security import Security, SQLAlchemyUserDatastore, \
     UserMixin, RoleMixin, login_required, current_user
@@ -34,6 +33,7 @@ from app.docker_client import *
 eventlet.monkey_patch()
 
 APP_ROOT = os.path.dirname(os.path.abspath(__file__))
+YSHANKA_TAG = '*** YSHANKA:'
 
 app = flask.Flask(__name__)
 app.config.from_object('config')
@@ -50,8 +50,22 @@ docker_thread = None
 
 model_containers = {}
 
+class PyRserveEncoder(json.JSONEncoder):
+    def default(self, obj):
+        if isinstance(obj, pyRserve.TaggedList):
+            return OrderedDict(obj.astuples())
+        elif issubclass(obj.__class__, np.ndarray):
+            return obj.tolist()
+        else:
+            return json.JSONEncoder.default(self, obj)
+
+def parse_model_state(container, lines):
+    for line in lines.split('\n'):
+        m = re.search('"{} (.*)"'.format(re.escape(YSHANKA_TAG)), line)
+        if m:
+            model_containers[container]['model_state'] = m.group(1)
+
 def send_history(container):
-    print("send_history " + container)
     history = docker_client.logs(
         container=container,
         stdout=True,
@@ -59,6 +73,8 @@ def send_history(container):
         timestamps=True,
         stream=False,
         tail="all")
+
+    parse_model_state(container, history)
 
     with app.app_context():
         emit('logs', dict(logs=history, clear=True), room='logs_' + container, namespace='/logs')
@@ -69,7 +85,7 @@ def start_background_task(f, *args, **kwargs):
 def stream_logs(container):
     while True:
         send_history(container)
-        # since = time.time()
+
         try:
             print("Stream logs " + container)
             line = ''
@@ -81,14 +97,17 @@ def stream_logs(container):
                              tail=0):
                 line += s
                 if line.endswith('\n'):
+                    parse_model_state(container, line)
+
                     with app.app_context():
-                        #print("sent line " + len(line))
                         emit('logs', dict(logs=line), room='logs_' + container, namespace='/logs')
                     line = ''
-                    since = time.time()
 
-        except (requests.exceptions.ConnectionError, docker.errors.NotFound) as e:
+        except requests.exceptions.ConnectionError:
+            pass
+        except docker.errors.NotFound as e:
             print("Logs ConnectionError: " + container + ' ' + str(e))
+            eventlet.sleep(1)
 
 def stream_stats(container):
     while True:
@@ -97,8 +116,11 @@ def stream_stats(container):
             for s in docker_client.stats(container, decode=True, stream=True):
                 with app.app_context():
                     emit('stats', {'model_name': container, 'stats': s}, room='stats', namespace='/logs')
-        except (requests.exceptions.ConnectionError, docker.errors.NotFound) as e:
+        except requests.exceptions.ConnectionError:
+            pass
+        except docker.errors.NotFound:
             print("Stats ConnectionError" + container + ' ' + str(e))
+            eventlet.sleep(1)
 
 def stream_states():
     print("stream_states")
@@ -116,12 +138,16 @@ def stream_states():
                 model_containers[model_name] = dict(
                     logs_thread=start_background_task(stream_logs, model_name),
                     stats_thread=start_background_task(stream_stats, model_name),
-                    port=rserve_ports[0])
+                    port=rserve_ports[0],
+                    model_state='parsing logs...')
 
             with app.app_context():
-                emit('states', {'model_name': model_name, 'state': c['State']}, room='states', namespace='/logs')
+                emit('states', dict(
+                    model_name=model_name,
+                    state=c['State'],
+                    model_state=model_containers[model_name]['model_state']), room='states', namespace='/logs')
 
-        socketio.sleep(1)
+        eventlet.sleep(1)
 
 status_thread = start_background_task(stream_states)
 
@@ -185,13 +211,27 @@ def deploy_model():
     db.session.add(model)
     db.session.commit()
 
-    deps = ''
-    for p in json.loads(flask.request.form['packages'], object_pairs_hook=OrderedDict):
+    deps = """
+    sink(stderr());
+    print("{yshanka_tag} initialization");
+    """.format(yshanka_tag=YSHANKA_TAG)
+
+    libraries = json.loads(flask.request.form['packages'], object_pairs_hook=OrderedDict)
+    for i, p in enumerate(libraries):
         dep = PredictiveModelDependency(**p)
         dep.model_id = model.id
         db.session.add(dep)
         if p['install']:
-            deps += "install.packages('{}');\n".format(p['importName'])
+            deps += """
+            print("{yshanka_tag} installing ({i}/{len}): {library}");
+            install.packages('{library}');
+            """.format(
+                yshanka_tag=YSHANKA_TAG,
+                library=p['importName'],
+                i=i+1,
+                len=len(libraries))
+
+    deps += 'print("{yshanka_tag} ready");\n'.format(yshanka_tag=YSHANKA_TAG)
 
     db.session.commit()
     template_dir = os.path.realpath(APP_ROOT + '/../worker/')
@@ -261,7 +301,7 @@ def call_model(user, model_name):
     model_predict = getattr(conn.r, 'model.predict')
 
     od = json.loads(flask.request.data.decode('utf-8'), object_pairs_hook=OrderedDict)
-    delimited = io.StringIO()
+    delimited = io.BytesIO()
     writer = csv.writer(delimited, delimiter=',')
     writer.writerow(od.keys())
     writer.writerows(zip(*[od[key] for key in od.keys()]))
@@ -280,11 +320,14 @@ def call_model(user, model_name):
     res = model_predict(pyRserve.TaggedList(kv))
     conn.close()
 
-    # make jsonify happy
-    od = OrderedDict(res.astuples())
-    fl = {k: v.tolist() for k, v in od.items()}
+    # emulate yhatr brehavior to coerce to dataframe on client
+    if isinstance(res, pyRserve.TaggedList):
+        res = dict(result=res)
 
-    return flask.jsonify({'result': fl})
+    return flask.Response(
+        response=json.dumps(res, cls=PyRserveEncoder),
+        status=200,
+        mimetype="application/json")
 
 @socketio.on('joined_states', namespace='/logs')
 def joined_statuses(message):

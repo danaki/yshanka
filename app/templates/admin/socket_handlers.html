@@ -1,16 +1,17 @@
 
 socket.on('states', function(data) {
-  model_name = data.model_name
-  state = data.state;
-  id = '#' + model_name + '-state'
+  state = data.state.toLowerCase();
 
+  id = '#' + data.model_name + '-state'
+  console.dir(data)
   $(id).text(state);
-
-  if (state.toLowerCase() == 'running') {
+  if (state == 'running') {
     $(id).removeClass('label-default').addClass('label-success');
   } else {
     $(id).removeClass('label-success').addClass('label-default');
   }
+
+  $('#' + data.model_name + '-model_state').text(data.model_state);
 });
 
 socket.on('stats', function(data) {
