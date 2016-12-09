@@ -2,7 +2,7 @@
 socket.on('states', function(data) {
   state = data.state.toLowerCase();
 
-  id = '#' + data.model_name + '-state'
+  id = '#' + data.container_name + '-state'
   console.dir(data)
   $(id).text(state);
   if (state == 'running') {
@@ -11,13 +11,12 @@ socket.on('states', function(data) {
     $(id).removeClass('label-success').addClass('label-default');
   }
 
-  $('#' + data.model_name + '-model_state').text(data.model_state);
+  $('#' + data.container_name + '-yshanka_state').text(data.yshanka_state);
 });
 
 socket.on('stats', function(data) {
-  model_name = data.model_name
   stats = data.stats;
-  id = '#' + model_name + '-stats'
+  id = '#' + data.container_name + '-stats'
   var cpuDelta = stats.cpu_stats.cpu_usage.total_usage - stats.precpu_stats.cpu_usage.total_usage;
   var systemDelta = stats.cpu_stats.system_cpu_usage - stats.precpu_stats.system_cpu_usage;
   $(id + ' .cpu').text('CPU: ' + Math.round(cpuDelta / systemDelta * 100) + '%');

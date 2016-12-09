@@ -2,13 +2,22 @@ from flask_security import current_user, utils
 from flask import url_for, redirect, render_template, request, abort, Markup, flash
 from flask_admin.contrib import sqla
 from flask_admin.actions import action
+from flask_admin.model import typefmt
+from flask_admin.model.template import macro
 from wtforms.fields import PasswordField, StringField
 from wtforms.widgets import Input
-from app.models import PredictiveModel
+from app.models import PredictiveModel, Build
 from app.docker_client import *
+from datetime import date
+
+
+MY_DEFAULT_FORMATTERS = dict(typefmt.BASE_FORMATTERS)
+MY_DEFAULT_FORMATTERS.update({
+        type(None): typefmt.null_formatter,
+        date: lambda view, value: value.strftime("%Y-%m-%d %H:%M")
+    })
 
 class AdminView(sqla.ModelView):
-
     def is_accessible(self):
         if not current_user.is_active or not current_user.is_authenticated:
             return False
@@ -32,7 +41,6 @@ class AdminView(sqla.ModelView):
 
 
 class ApikeyField(StringField):
-
     def __call__(self, **kwargs):
         return super(self.__class__, self).__call__(**kwargs) + "<a href='#' onclick='javascript:$(this).prev(\"input\").val(Array.apply(0, Array(32)).map(function() { return Math.floor(Math.random() * 16).toString(16); }).join(\"\"));'>Regenerate</a>"
 
@@ -71,25 +79,34 @@ class UserAdminView(AdminView):
             model.password = utils.encrypt_password(model.password2)
 
 class PredictiveModelView(AdminView):
-    column_exclude_list = list = ('code',)
+    column_list = ('user.username', 'model_name', 'active_build.version', 'active_build.created_date')
+    column_labels = {
+        'user.username': 'Owner',
+        'model_name': 'Model',
+        'active_build.version': 'Version',
+        'active_build.created_date': 'Deployed'
+        }
+    column_type_formatters = MY_DEFAULT_FORMATTERS
+
     can_create = False
     can_edit = False
     can_delete = True
     can_view_details = True
+
     details_template = 'admin/predictive_model_details.html'
     list_template = 'admin/predictive_model_list.html'
 
-    def _name_formatter(view, context, model, name):
+    def model_name_formatter(view, context, model, name):
         return Markup("""
-        {model_name} <span class="label label-default" id="{model_name}-state"></span>
-        <span class="label label-info" id="{model_name}-model_state"></span>
-        <span id="{model_name}-stats">
+        {model_name} <span class="label label-default" id="{container_name}-state"></span>
+        <span class="label label-info" id="{container_name}-yshanka_state"></span>
+        <span id="{container_name}-stats">
             <span class="badge cpu"></span>
             <span class="badge mem"></span>
-        </span>""".format(model_name=model.name))
+        </span>""".format(model_name=model.model_name, container_name=model.active_build.container_name))
 
     column_formatters = {
-       'name': _name_formatter
+       'model_name': model_name_formatter
     }
 
     @action('restart', 'Restart', 'Are you sure you want to restart selected models?')

@@ -4,16 +4,48 @@
 {% endblock %}
 
 {% block details_table %}
-  <h3>{{model.name}}
-    <span class="label label-default" id="{{model.name}}-state"></span>
-    <span class="label label-default" id="{{model.name}}-model_state"></span>
-    <span id="{{model.name}}-stats">
+  <h3>{{model.model_name}} <small>version: {{model.active_build.version}}</small>
+    <span class="label label-default" id="{{model.active_build.container_name}}-state"></span>
+    <span class="label label-info" id="{{model.active_build.container_name}}-yshanka_state"></span>
+    <span id="{{model.active_build.container_name}}-stats">
         <span class="badge cpu"></span>
         <span class="badge mem"></span>
     </span>
   </h3>
 
   <textarea id="logs" rows="20" class="form-control" style="min-width: 100%"></textarea><br><br>
+
+  <table class="table table-striped table-bordered table-hover model-list">
+      <thead>
+          <tr>
+              <th class="column-header">Version</th>
+              <th class="column-header">Deployed</th>
+              <th class="column-header">&nbsp;</th>
+          </tr>
+      </thead>
+      {% for row in model.builds %}
+      <tr>
+          <td class="col">{{ row.version }}</td>
+          <td class="col">{{ row.created_date.strftime("%Y-%m-%d %H:%M") }}</td>
+          <td class="col">
+            <button type="button" class="btn btn-default btn-xs">Source</button>
+            <button type="button" class="btn btn-default btn-xs">Dependencies</button>
+            <button type="button" class="btn btn-primary btn-xs disabled">Activate</button>
+          </td>
+      </tr>
+      {% else %}
+      <tr>
+          <td colspan="999">
+              <div class="text-center">
+                  {{ admin_view.get_empty_list_message() }}
+              </div>
+          </td>
+      </tr>
+      {% endfor %}
+  </table>
+
+
+
 {% endblock %}
 
 {% block tail %}
@@ -23,12 +55,12 @@
     $(document).ready(function(){
       socket = io.connect('http://' + document.domain + ':' + location.port + '/logs');
       socket.on('connect', function() {
-          socket.emit('joined_logs', {model_name: '{{model.name}}'});
+          socket.emit('joined_logs', {model_name: '{{model.active_build.container_name}}'});
           socket.emit('joined_stats', {});
           socket.emit('joined_states', {});
       });
 
-      {% include 'admin/socket_handlers.html' %}
+      {% include 'admin/socket_handlers.js' %}
     });
   </script>
 {% endblock %}

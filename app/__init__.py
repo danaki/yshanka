@@ -1,6 +1,6 @@
 from __future__ import print_function
 
-import flask
+import werkzeug
 import pyRserve
 import numpy as np
 import json
@@ -15,6 +15,7 @@ import eventlet
 import docker
 import requests
 
+from flask import Flask, Response, request, jsonify, url_for, render_template
 from flask_admin import helpers as admin_helpers
 from flask_socketio import SocketIO, emit, join_room, leave_room
 
@@ -35,7 +36,7 @@ eventlet.monkey_patch()
 APP_ROOT = os.path.dirname(os.path.abspath(__file__))
 YSHANKA_TAG = '*** YSHANKA:'
 
-app = flask.Flask(__name__)
+app = Flask(__name__)
 app.config.from_object('config')
 
 db.init_app(app)
@@ -59,108 +60,169 @@ class PyRserveEncoder(json.JSONEncoder):
         else:
             return json.JSONEncoder.default(self, obj)
 
-def parse_model_state(container, lines):
+def dockerize_name(name):
+    # for regex see https://github.com/docker/docker/pull/3253
+    return re.sub(r"[^a-zA-Z0-9_.-]", '_', name)
+
+def model_to_image_name(model_name, version):
+    # see http://stackoverflow.com/questions/36741678/docker-invalid-tag-value
+    return 'yshanka/{}:{}'.format(dockerize_name(model_name).lower(), version)
+
+def model_to_container_name(model_name, version):
+    return 'yshanka_{}_{}'.format(dockerize_name(model_name), version)
+
+def parse_yshanka_state(lines):
+    state = None
     for line in lines.split('\n'):
         m = re.search('"{} (.*)"'.format(re.escape(YSHANKA_TAG)), line)
         if m:
-            model_containers[container]['model_state'] = m.group(1)
+            state = m.group(1)
 
-def send_history(container):
+    return state
+
+def send_history(container_name):
     history = docker_client.logs(
-        container=container,
+        container=container_name,
         stdout=True,
         stderr=True,
         timestamps=True,
         stream=False,
         tail="all")
 
-    parse_model_state(container, history)
+    model_containers[container_name]['yshanka_state'] = parse_yshanka_state(history)
 
     with app.app_context():
-        emit('logs', dict(logs=history, clear=True), room='logs_' + container, namespace='/logs')
+        emit('logs', dict(logs=history, clear=True), room='logs_' + container_name, namespace='/logs')
 
 def start_background_task(f, *args, **kwargs):
     return eventlet.spawn(f, *args, **kwargs)
 
-def stream_logs(container):
+def stream_logs(container_name):
     while True:
-        send_history(container)
+        with app.app_context():
+            send_history(container_name)
 
-        try:
-            print("Stream logs " + container)
-            line = ''
-            for s in docker_client.logs(container=container,
-                             stdout=True,
-                             stderr=True,
-                             timestamps=True,
-                             stream=True,
-                             tail=0):
-                line += s
-                if line.endswith('\n'):
-                    parse_model_state(container, line)
+            try:
+                app.logger.debug("Stream logs " + container_name)
+                line = ''
+                for s in docker_client.logs(container=container_name,
+                                 stdout=True,
+                                 stderr=True,
+                                 timestamps=True,
+                                 stream=True,
+                                 tail=0):
+                    line += s
+                    if line.endswith('\n'):
+                        model_containers[container_name]['yshanka_state'] = parse_yshanka_state(line)
+                        emit('logs', dict(logs=line), room='logs_' + container_name, namespace='/logs')
+                        line = ''
 
+            except requests.exceptions.ConnectionError:
+                pass
+            except docker.errors.NotFound as e:
+                app.logger.debug("Logs ConnectionError: " + container_name + ' ' + str(e))
+                eventlet.sleep(1)
+
+def stream_stats(container_name):
+    while True:
+        with app.app_context():
+            try:
+                app.logger.debug("Stream stats " + container_name)
+                for s in docker_client.stats(container_name, decode=True, stream=True):
                     with app.app_context():
-                        emit('logs', dict(logs=line), room='logs_' + container, namespace='/logs')
-                    line = ''
+                        emit('stats', dict(container_name=container_name, stats=s), room='stats', namespace='/logs')
+            except requests.exceptions.ConnectionError:
+                pass
+            except docker.errors.NotFound:
+                app.logger.debug("Stats ConnectionError" + container_name + ' ' + str(e))
+                eventlet.sleep(1)
 
-        except requests.exceptions.ConnectionError:
-            pass
-        except docker.errors.NotFound as e:
-            print("Logs ConnectionError: " + container + ' ' + str(e))
-            eventlet.sleep(1)
-
-def stream_stats(container):
+def watch_containers():
     while True:
-        try:
-            print("Stream stats " + container)
-            for s in docker_client.stats(container, decode=True, stream=True):
-                with app.app_context():
-                    emit('stats', {'model_name': container, 'stats': s}, room='stats', namespace='/logs')
-        except requests.exceptions.ConnectionError:
-            pass
-        except docker.errors.NotFound:
-            print("Stats ConnectionError" + container + ' ' + str(e))
-            eventlet.sleep(1)
+        # TODO: stop monitoring if container not in the list or stopped
+        with app.app_context():
+            for c in docker_client.containers(all=True, filters=dict(name='yshanka')):
+                rserve_ports = [p['PublicPort'] for p in c['Ports'] if p['PrivatePort'] == 6311]
+                if len(rserve_ports) == 0:
+                    break
 
-def stream_states():
-    print("stream_states")
-    while True:
-        # TODO: stop monitoring if container not in the list or stoped
-        for c in docker_client.containers(all=True):
-            rserve_ports = [p['PublicPort'] for p in c['Ports'] if p['PrivatePort'] == 6311]
-            if len(rserve_ports) == 0:
-                break
+                container_name = c['Names'][0].replace('/', '')
 
-            model_name = c['Names'][0].replace('/', '')
+                if not container_name in model_containers:
+                    app.logger.debug("Start watchers "+ container_name)
+                    model_containers[container_name] = dict(
+                        logs_thread=start_background_task(stream_logs, container_name),
+                        stats_thread=start_background_task(stream_stats, container_name),
+                        port=rserve_ports[0],
+                        yshanka_state='parsing logs...')
 
-            if not model_name in model_containers:
-                print("Starting "+ model_name)
-                model_containers[model_name] = dict(
-                    logs_thread=start_background_task(stream_logs, model_name),
-                    stats_thread=start_background_task(stream_stats, model_name),
-                    port=rserve_ports[0],
-                    model_state='parsing logs...')
-
-            with app.app_context():
                 emit('states', dict(
-                    model_name=model_name,
-                    state=c['State'],
-                    model_state=model_containers[model_name]['model_state']), room='states', namespace='/logs')
+                        container_name=container_name,
+                        state=c['State'],
+                        yshanka_state=model_containers[container_name]['yshanka_state']),
+                    room='states', namespace='/logs')
 
         eventlet.sleep(1)
 
-status_thread = start_background_task(stream_states)
+def deployer_thread(image_name, container_name, model_file, deps):
+    template_dir = os.path.realpath(APP_ROOT + '/../worker/')
+    f = tempfile.NamedTemporaryFile()
+    t = tarfile.open(mode='w', fileobj=f)
+    abs_path = os.path.abspath(template_dir)
+
+    t.add(abs_path, arcname='.', recursive=True)
+
+    info = tarfile.TarInfo("env.RData")
+    model_file.seek(0, os.SEEK_END)
+    info.size = model_file.tell()
+    model_file.seek(0)
+    t.addfile(info, model_file)
+
+    info = tarfile.TarInfo("deps.R")
+    info.size = len(deps)
+    t.addfile(info, io.BytesIO(deps.encode('utf-8')))
+
+    t.close()
+    f.seek(0)
+
+    for line in docker_client.build(fileobj=f, rm=True, tag=image_name, custom_context=True):
+        out = json.loads(line)
+        if not 'stream' in out:
+            app.logger.debug(out)
+        app.logger.error(out['stream'], end="")
+
+    container = docker_client.create_container(
+        image_name,
+        detach=True,
+        name=container_name,
+        host_config=docker_client.create_host_config(port_bindings={
+            6311: ('0.0.0.0',)
+        }))
+    docker_client.start(container=container.get('Id'))
+
+    if container_name in model_containers:
+        eventlet.kill(model_containers[container_name]['logs_thread'])
+        eventlet.kill(model_containers[container_name]['stats_thread'])
+        print("Kill sent " + container_name)
+        del model_containers[container_name]
+
+status_thread = start_background_task(watch_containers)
 
 
 @app.errorhandler(404)
 def not_found(error):
-    err = {'message': "Resource doesn't exist."}
-    return flask.jsonify(**err)
+    return jsonify(dict(message="Resource doesn't exist."))
+
+@app.errorhandler(500)
+def handle_invalid_usage(error):
+    response = jsonify(error.to_dict())
+    response.status_code = error.status_code
+    return response
 
 # Flask views
 @app.route('/')
 def index():
-    return flask.render_template('index.html')
+    return render_template('index.html')
 
 # Create admin
 admin = flask_admin.Admin(
@@ -183,32 +245,61 @@ def security_context_processor():
         admin_base_template=admin.base_template,
         admin_view=admin.index_view,
         h=admin_helpers,
-        get_url=flask.url_for
+        get_url=url_for
     )
 
 
 @app.route('/verify', methods=['POST'])
 def verify():
-    return flask.jsonify({"success": "true"})
+    u = User.query.filter_by(
+        username=request.args['username'],
+        apikey=request.args['apikey']).first_or_404()
+
+    return jsonify(dict(success=str(True).lower()))
 
 @app.route('/deployer/model', methods=['POST'])
 def deploy_model():
-    from pprint import pprint
-    pprint(flask.request.form)
+    user = User.query.filter_by(
+        username=request.args['username'],
+        apikey=request.args['apikey'],
+        ).first_or_404()
 
-    model_name = flask.request.form['modelname']
-    model_file = flask.request.files['model_image']
+    model_name = request.form['modelname']
+    code       = request.form['code']
+    packages   = request.form['packages']
 
-    #flask.request.files['model_image'].save(model_file)
-    code = flask.request.form['code']
+    model_file = request.files['model_image']
 
-    model = PredictiveModel.query.filter_by(name = flask.request.form['modelname']).first()
+    model = PredictiveModel.query.filter_by(model_name=model_name).first()
     if not model:
-        model = PredictiveModel(name=flask.request.form['modelname'])
+        version = 1
+    elif model.user.id != user.id:
+        raise werkzeug.exceptions.Forbidden('Not an owner')
+    else:
+        version = int(db.session.query(db.func.max(Build.version)).filter_by(predictive_model=model)) + 1
 
-    model.code = flask.request.form['code']
+    container_name = model_to_container_name(model_name, version)
+    try:
+        docker_client.inspect_container(container_name)
+    except docker.errors.NotFound:
+        pass
+    else:
+        raise werkzeug.exceptions.Forbidden('A container with name {} already exists. Dunno what to do.'.format(container_name))
+
+    if version == 1:
+        model = PredictiveModel(
+            model_name=model_name,
+            user=user)
+
+    build = Build(
+        container_name=container_name,
+        version=version,
+        code=code,
+        predictive_model=model
+    )
 
     db.session.add(model)
+    db.session.add(build)
     db.session.commit()
 
     deps = """
@@ -216,10 +307,10 @@ def deploy_model():
     print("{yshanka_tag} initialization");
     """.format(yshanka_tag=YSHANKA_TAG)
 
-    libraries = json.loads(flask.request.form['packages'], object_pairs_hook=OrderedDict)
+    libraries = json.loads(packages, object_pairs_hook=OrderedDict)
     for i, p in enumerate(libraries):
-        dep = PredictiveModelDependency(**p)
-        dep.model_id = model.id
+        dep = BuildDependency(**p)
+        dep.build = build
         db.session.add(dep)
         if p['install']:
             deps += """
@@ -233,74 +324,24 @@ def deploy_model():
 
     deps += 'print("{yshanka_tag} ready");\n'.format(yshanka_tag=YSHANKA_TAG)
 
+    image_name = model_to_image_name(model_name, version)
+    deployer_thread(image_name, container_name, model_file, deps)
+
+    model.active_build = build
+    db.session.add(model)
     db.session.commit()
-    template_dir = os.path.realpath(APP_ROOT + '/../worker/')
-    f = tempfile.NamedTemporaryFile()
 
-    t = tarfile.open(mode='w', fileobj=f)
-
-    abs_path = os.path.abspath(template_dir)
-
-    t.add(abs_path, arcname='.', recursive=True)
-
-    info = tarfile.TarInfo("env.RData")
-    model_file.seek(0, os.SEEK_END)
-    info.size = model_file.tell()
-    model_file.seek(0)
-    t.addfile(info, model_file)
-
-    info = tarfile.TarInfo("deps.R")
-    info.size = len(deps)
-    t.addfile(info, io.BytesIO(deps.encode('utf-8')))
-
-    t.close()
-    f.seek(0)
-
-    @flask.copy_current_request_context
-    def releaser_thread(model_name, dockerfile):
-        image = 'yshan:' + model_name
-        containers = docker_client.containers(all=True, filters=dict(name=model_name))
-        if len(containers) > 0:
-            print("Removing and stoping previous " + model_name)
-            docker_client.stop(model_name, timeout=0)
-            docker_client.remove_container(model_name, force=True)
-            docker_client.remove_image(image, force=True)
-
-        for line in docker_client.build(fileobj=f, rm=True, tag=image, custom_context=True):
-            out = flask.json.loads(line)
-            if not 'stream' in out:
-                print(out)
-            print(out['stream'], end="")
-
-        container = docker_client.create_container(
-            image,
-            detach=True,
-            name=model_name,
-            host_config=docker_client.create_host_config(port_bindings={
-                6311: ('0.0.0.0',)
-            }))
-        docker_client.start(container=container.get('Id'))
-
-        if model_name in model_containers:
-            eventlet.greenthread.kill(model_containers[model_name]['logs_thread'])
-            eventlet.greenthread.kill(model_containers[model_name]['stats_thread'])
-            print("Kill sent " + model_name)
-            del model_containers[model_name]
-
-    start_background_task(releaser_thread, model_name, f)
-
-    return flask.jsonify({"success": "true"})
+    return jsonify(dict(success=str(True).lower()))
 
 @app.route('/<user>/models/<path:model_name>/', methods=['POST'])
 def call_model(user, model_name):
     host = re.search('(?:http.*://)?(?P<host>[^:/ ]+).?(?P<port>[0-9]*).*', docker_client.base_url).group('host')
     port = model_containers[model_name]['port']
-    print(dict(host=host, port=port))
 
     conn = pyRserve.connect(host=host, port=port)
     model_predict = getattr(conn.r, 'model.predict')
 
-    od = json.loads(flask.request.data.decode('utf-8'), object_pairs_hook=OrderedDict)
+    od = json.loads(request.data.decode('utf-8'), object_pairs_hook=OrderedDict)
     delimited = io.BytesIO()
     writer = csv.writer(delimited, delimiter=',')
     writer.writerow(od.keys())
@@ -324,7 +365,7 @@ def call_model(user, model_name):
     if isinstance(res, pyRserve.TaggedList):
         res = dict(result=res)
 
-    return flask.Response(
+    return Response(
         response=json.dumps(res, cls=PyRserveEncoder),
         status=200,
         mimetype="application/json")
