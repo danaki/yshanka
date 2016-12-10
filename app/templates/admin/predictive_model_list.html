@@ -7,8 +7,8 @@
     $(document).ready(function() {
       socket = io.connect('http://' + document.domain + ':' + location.port + '/logs');
       socket.on('connect', function() {
-          socket.emit('joined_states', {});
-          socket.emit('joined_stats', {});
+        socket.emit('joined_states', {});
+        socket.emit('joined_stats', {});
       });
 
       {% include 'admin/socket_handlers.js' %}

@@ -188,8 +188,8 @@ def deployer_thread(image_name, container_name, model_file, deps):
     for line in docker_client.build(fileobj=f, rm=True, tag=image_name, custom_context=True):
         out = json.loads(line)
         if not 'stream' in out:
-            app.logger.debug(out)
-        app.logger.error(out['stream'], end="")
+            app.logger.error(out)
+        app.logger.error(out['stream'].rstrip('\n'))
 
     container = docker_client.create_container(
         image_name,
@@ -276,7 +276,7 @@ def deploy_model():
     elif model.user.id != user.id:
         raise werkzeug.exceptions.Forbidden('Not an owner')
     else:
-        version = int(db.session.query(db.func.max(Build.version)).filter_by(predictive_model=model)) + 1
+        version = int(db.session.query(db.func.max(Build.version)).filter_by(predictive_model=model).scalar()) + 1
 
     container_name = model_to_container_name(model_name, version)
     try:
@@ -309,7 +309,7 @@ def deploy_model():
 
     libraries = json.loads(packages, object_pairs_hook=OrderedDict)
     for i, p in enumerate(libraries):
-        dep = BuildDependency(**p)
+        dep = Dependency(**p)
         dep.build = build
         db.session.add(dep)
         if p['install']:

@@ -3,7 +3,6 @@ socket.on('states', function(data) {
   state = data.state.toLowerCase();
 
   id = '#' + data.container_name + '-state'
-  console.dir(data)
   $(id).text(state);
   if (state == 'running') {
     $(id).removeClass('label-default').addClass('label-success');

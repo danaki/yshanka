@@ -8,51 +8,93 @@
     <span class="label label-default" id="{{model.active_build.container_name}}-state"></span>
     <span class="label label-info" id="{{model.active_build.container_name}}-yshanka_state"></span>
     <span id="{{model.active_build.container_name}}-stats">
-        <span class="badge cpu"></span>
-        <span class="badge mem"></span>
+      <span class="badge cpu"></span>
+      <span class="badge mem"></span>
     </span>
   </h3>
 
   <textarea id="logs" rows="20" class="form-control" style="min-width: 100%"></textarea><br><br>
 
   <table class="table table-striped table-bordered table-hover model-list">
-      <thead>
-          <tr>
-              <th class="column-header">Version</th>
-              <th class="column-header">Deployed</th>
-              <th class="column-header">&nbsp;</th>
-          </tr>
-      </thead>
-      {% for row in model.builds %}
+    <thead>
       <tr>
-          <td class="col">{{ row.version }}</td>
-          <td class="col">{{ row.created_date.strftime("%Y-%m-%d %H:%M") }}</td>
-          <td class="col">
-            <button type="button" class="btn btn-default btn-xs">Source</button>
-            <button type="button" class="btn btn-default btn-xs">Dependencies</button>
-            <button type="button" class="btn btn-primary btn-xs disabled">Activate</button>
-          </td>
+        <th class="column-header">Version</th>
+        <th class="column-header">Deployed</th>
+        <th class="column-header">&nbsp;</th>
       </tr>
-      {% else %}
-      <tr>
-          <td colspan="999">
-              <div class="text-center">
-                  {{ admin_view.get_empty_list_message() }}
-              </div>
-          </td>
-      </tr>
-      {% endfor %}
+    </thead>
+    {% for build in model.builds %}
+    <tr>
+      <td class="col">{{ build.version }}</td>
+      <td class="col">{{ build.created_date.strftime("%Y-%m-%d %H:%M") }}</td>
+      <td class="col">
+        <button type="button" class="btn btn-default btn-xs" data-toggle="modal" data-target="#code-modal" data-url="{{ url_for('.build_code', id=build.id) }}">Source</button>
+        <button type="button" class="btn btn-default btn-xs" data-toggle="modal" data-target="#deps-modal" data-url="{{ url_for('.build_deps', id=build.id) }}">Dependencies</button>
+        <button type="button" class="btn btn-primary btn-xs disabled">Activate</button>
+      </td>
+    </tr>
+    {% else %}
+    <tr>
+      <td colspan="999">
+        <div class="text-center">
+          {{ admin_view.get_empty_list_message() }}
+        </div>
+      </td>
+    </tr>
+    {% endfor %}
   </table>
 
+  <div class="modal fade" id="code-modal" tabindex="-1" role="dialog" aria-labelledby="code-modal-label">
+    <div class="modal-dialog" role="document">
+      <div class="modal-content">
+        <div class="modal-header">
+          <button type="button" class="close" data-dismiss="modal" aria-label="Close"><span aria-hidden="true">&times;</span></button>
+          <h4 class="modal-title" id="code-modal-label">Model code</h4>
+        </div>
+        <div class="modal-body">
+          <pre></pre>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-default" data-dismiss="modal">Close</button>
+        </div>
+      </div>
+    </div>
+  </div>
 
-
+  <div class="modal fade" id="deps-modal" tabindex="-1" role="dialog" aria-labelledby="deps-modal-label">
+    <div class="modal-dialog" role="document">
+      <div class="modal-content">
+        <div class="modal-header">
+          <button type="button" class="close" data-dismiss="modal" aria-label="Close"><span aria-hidden="true">&times;</span></button>
+          <h4 class="modal-title" id="code-modal-label">Model dependencies</h4>
+        </div>
+        <div class="modal-body">
+          <table style="width:100%; border: 1px">
+            <thead>
+              <tr>
+                <th>Name</th>
+                <th>Version</th>
+                <th>Source</th>
+                <th>Install</th>
+              </tr>
+            </thead>
+            <tbody>
+            </tbody>
+          </table>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-default" data-dismiss="modal">Close</button>
+        </div>
+      </div>
+    </div>
+  </div>
 {% endblock %}
 
 {% block tail %}
   {{ super() }}
   <script type="text/javascript" charset="utf-8">
     var socket;
-    $(document).ready(function(){
+    $(document).ready(function() {
       socket = io.connect('http://' + document.domain + ':' + location.port + '/logs');
       socket.on('connect', function() {
           socket.emit('joined_logs', {model_name: '{{model.active_build.container_name}}'});
@@ -63,4 +105,38 @@
       {% include 'admin/socket_handlers.js' %}
     });
   </script>
+
+  <script type="text/javascript" charset="utf-8">
+    $(document).ready(function() {
+      $('#code-modal').on('show.bs.modal', function (event) {
+        var button = $(event.relatedTarget);
+        var modal = $(this);
+        $.get(button.data('url'), function (data) {
+          modal.find('.modal-body pre').text(data);
+        });
+      })
+    });
+
+    $(document).ready(function() {
+      $('#deps-modal').on('show.bs.modal', function (event) {
+        var button = $(event.relatedTarget);
+        var modal = $(this);
+        $.get(button.data('url'), function (data) {
+          t = modal.find('table');
+          b = $('tbody', t).html('').get(0)
+
+          $.each(data, function(i, v) {
+              var r = b.insertRow();
+              r.insertCell().appendChild(document.createTextNode(v['name']));
+              r.insertCell().appendChild(document.createTextNode(v['version']));
+              r.insertCell().appendChild(document.createTextNode(v['source']));
+              r.insertCell().appendChild(document.createTextNode(v['install']));
+          })
+          $(t).append(b);
+        });
+      })
+    });
+
+  </script>
+
 {% endblock %}

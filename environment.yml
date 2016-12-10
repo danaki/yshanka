@@ -2,6 +2,7 @@ name: yshanka
 dependencies:
   - flask
   - sqlalchemy
+  - marshmallow-sqlalchemy
   - jinja2
   - werkzeug
   - docker-py
