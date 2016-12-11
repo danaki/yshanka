@@ -9,14 +9,15 @@ $ git clone ... ; cd ...
 $ conda env create -n yshanka
 $ python manage.py db upgrade
 $ python manage.py seed
+$ docker-machine start
 ```
 
 Run
 ----------------
 
-```
-$ R_HOME="/usr/lib/R" R_LIB="Rlib" /usr/lib/R/bin/Rserve --RS-conf Rserve.conf --RS-source code.R --vanilla
-$ python manage.py runserver
+```python
+$ python manage.py run
 ```
 
-To be continued...
+
+
