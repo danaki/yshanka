@@ -9,6 +9,7 @@ from flask_admin.model.template import macro
 from marshmallow_sqlalchemy import ModelSchema
 from wtforms.fields import PasswordField, StringField
 from wtforms.widgets import Input
+from app.database import db
 from app.models import PredictiveModel, Build, Dependency
 from app.docker_client import *
 from datetime import date
@@ -123,3 +124,19 @@ class PredictiveModelView(AdminView):
     @expose('/build/<int:id>/deps')
     def build_deps(self, id):
         return jsonify(dependency_schema.dump(Build.query.filter_by(id=id).first_or_404().dependencies).data)
+
+    @expose('/build/<int:id>/activate', methods=["POST"])
+    def activate_build(self, id):
+        build = Build.query.filter_by(id=id).first_or_404()
+        current_build = build.predictive_model.active_build
+        if (current_build):
+            docker_client.stop(build.predictive_model.active_build.container_name)
+            
+        build.predictive_model.active_build = build
+
+        db.session.add(build.predictive_model)
+        db.session.commit()
+
+        docker_client.start(build.container_name)
+
+        return redirect(url_for('.details_view', id=build.predictive_model_id))

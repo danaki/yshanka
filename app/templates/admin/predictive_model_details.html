@@ -30,7 +30,7 @@
       <td class="col">
         <button type="button" class="btn btn-default btn-xs" data-toggle="modal" data-target="#code-modal" data-url="{{ url_for('.build_code', id=build.id) }}">Source</button>
         <button type="button" class="btn btn-default btn-xs" data-toggle="modal" data-target="#deps-modal" data-url="{{ url_for('.build_deps', id=build.id) }}">Dependencies</button>
-        <button type="button" class="btn btn-primary btn-xs disabled">Activate</button>
+        <button type="button" class="btn btn-primary btn-xs {% if build.id == model.active_build_id %}disabled{% endif %} activate-build" data-url="{{ url_for('.activate_build', id=build.id) }}">Activate</button>
       </td>
     </tr>
     {% else %}
@@ -97,7 +97,7 @@
     $(document).ready(function() {
       socket = io.connect('http://' + document.domain + ':' + location.port + '/logs');
       socket.on('connect', function() {
-          socket.emit('joined_logs', {model_name: '{{model.active_build.container_name}}'});
+          socket.emit('joined_logs', {model_name: '{{ model.active_build.container_name }}'});
           socket.emit('joined_stats', {});
           socket.emit('joined_states', {});
       });
@@ -114,10 +114,8 @@
         $.get(button.data('url'), function (data) {
           modal.find('.modal-body pre').text(data);
         });
-      })
-    });
+      });
 
-    $(document).ready(function() {
       $('#deps-modal').on('show.bs.modal', function (event) {
         var button = $(event.relatedTarget);
         var modal = $(this);
@@ -134,7 +132,12 @@
           })
           $(t).append(b);
         });
-      })
+      });
+
+      $('.activate-build').on('click', function (event) {
+        var button = $(event.target);
+        $('<form action="' + button.data('url') + '" method="POST"></form>').appendTo('body').submit();
+      });
     });
 
   </script>

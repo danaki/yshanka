@@ -51,6 +51,18 @@ docker_thread = None
 
 model_containers = {}
 
+admin = flask_admin.Admin(
+    app,
+    'Yshanka',
+    base_template='my_master.html',
+    template_mode='bootstrap3',
+)
+
+admin.add_view(AdminView(Role, db.session, name='Roles'))
+admin.add_view(UserAdminView(User, db.session, name='Users'))
+admin.add_view(PredictiveModelView(PredictiveModel, db.session, name='Models'))
+
+
 class PyRserveEncoder(json.JSONEncoder):
     def default(self, obj):
         if isinstance(obj, pyRserve.TaggedList):
@@ -113,9 +125,15 @@ def stream_logs(container_name):
                                  tail=0):
                     line += s
                     if line.endswith('\n'):
-                        model_containers[container_name]['yshanka_state'] = parse_yshanka_state(line)
+                        yshanka_state = parse_yshanka_state(line)
+                        if not yshanka_state is None:
+                            model_containers[container_name]['yshanka_state'] = yshanka_state
                         emit('logs', dict(logs=line), room='logs_' + container_name, namespace='/logs')
                         line = ''
+                else:
+                    app.logger.debug("Container stopped?: " + container_name)
+                    stop_watching(container_name)
+                    break
 
             except requests.exceptions.ConnectionError:
                 pass
@@ -139,22 +157,22 @@ def stream_stats(container_name):
 
 def watch_containers():
     while True:
-        # TODO: stop monitoring if container not in the list or stopped
         with app.app_context():
             for c in docker_client.containers(all=True, filters=dict(name='yshanka')):
-                rserve_ports = [p['PublicPort'] for p in c['Ports'] if p['PrivatePort'] == 6311]
-                if len(rserve_ports) == 0:
-                    break
-
                 container_name = c['Names'][0].replace('/', '')
 
                 if not container_name in model_containers:
-                    app.logger.debug("Start watchers "+ container_name)
+                    app.logger.debug("Found new container: "+ container_name + ', state=' + c['State'])
                     model_containers[container_name] = dict(
-                        logs_thread=start_background_task(stream_logs, container_name),
-                        stats_thread=start_background_task(stream_stats, container_name),
-                        port=rserve_ports[0],
+                        logs_thread=None,
+                        stats_thread=None,
                         yshanka_state='parsing logs...')
+
+                if c['State'] == 'running' and model_containers[container_name]['logs_thread'] is None:
+                    model_containers[container_name]['logs_thread'] = start_background_task(stream_logs, container_name)
+
+                if c['State'] == 'running' and model_containers[container_name]['stats_thread'] is None:
+                    model_containers[container_name]['stats_thread'] = start_background_task(stream_stats, container_name)
 
                 emit('states', dict(
                         container_name=container_name,
@@ -163,6 +181,13 @@ def watch_containers():
                     room='states', namespace='/logs')
 
         eventlet.sleep(1)
+
+def stop_watching(container_name):
+    with app.app_context():
+        app.logger.debug("Stopped watching " + container_name)
+        eventlet.kill(model_containers[container_name]['logs_thread'])
+        eventlet.kill(model_containers[container_name]['stats_thread'])
+        del model_containers[container_name]
 
 def deployer_thread(image_name, container_name, model_file, deps):
     template_dir = os.path.realpath(APP_ROOT + '/../worker/')
@@ -198,13 +223,11 @@ def deployer_thread(image_name, container_name, model_file, deps):
         host_config=docker_client.create_host_config(port_bindings={
             6311: ('0.0.0.0',)
         }))
-    docker_client.start(container=container.get('Id'))
+    #docker_client.start(container=container.get('Id'))
 
     if container_name in model_containers:
-        eventlet.kill(model_containers[container_name]['logs_thread'])
-        eventlet.kill(model_containers[container_name]['stats_thread'])
-        print("Kill sent " + container_name)
-        del model_containers[container_name]
+        # will restart in watch_containers
+        stop_watching(container_name)
 
 status_thread = start_background_task(watch_containers)
 
@@ -219,26 +242,10 @@ def handle_invalid_usage(error):
     response.status_code = error.status_code
     return response
 
-# Flask views
 @app.route('/')
 def index():
     return render_template('index.html')
 
-# Create admin
-admin = flask_admin.Admin(
-    app,
-    'Yshanka',
-    base_template='my_master.html',
-    template_mode='bootstrap3',
-)
-
-# Add model views
-admin.add_view(AdminView(Role, db.session, name='Roles'))
-admin.add_view(UserAdminView(User, db.session, name='Users'))
-admin.add_view(PredictiveModelView(PredictiveModel, db.session, name='Models'))
-
-# define a context processor for merging flask-admin's template context into the
-# flask-security views.
 @security.context_processor
 def security_context_processor():
     return dict(
@@ -284,7 +291,7 @@ def deploy_model():
     except docker.errors.NotFound:
         pass
     else:
-        raise werkzeug.exceptions.Forbidden('A container with name {} already exists. Dunno what to do.'.format(container_name))
+        raise werkzeug.exceptions.NotImplemented('A container with name {} already exists. Dunno what to do.'.format(container_name))
 
     if version == 1:
         model = PredictiveModel(
@@ -327,7 +334,10 @@ def deploy_model():
     image_name = model_to_image_name(model_name, version)
     deployer_thread(image_name, container_name, model_file, deps)
 
-    model.active_build = build
+    if model.active_build is None:
+        model.active_build = build
+        docker_client.start(container_name)
+
     db.session.add(model)
     db.session.commit()
 
@@ -336,7 +346,22 @@ def deploy_model():
 @app.route('/<user>/models/<path:model_name>/', methods=['POST'])
 def call_model(user, model_name):
     host = re.search('(?:http.*://)?(?P<host>[^:/ ]+).?(?P<port>[0-9]*).*', docker_client.base_url).group('host')
-    port = model_containers[model_name]['port']
+
+    model = PredictiveModel.query.filter_by(model_name=model_name).first()
+    if not model:
+        raise werkzeug.exceptions.NotFound('Model {} not found'.format(model_name))
+
+    containers = docker_client.containers(filters=dict(status='running', name=model.active_build.container_name))
+    if len(containers) != 1:
+        raise werkzeug.exceptions.ServiceUnavailable('Model {} container either not running or multiple found'.format(model_name))
+
+    c = containers[0]
+    container_name = c['Names'][0].replace('/', '')
+    rserve_ports = [p['PublicPort'] for p in c['Ports'] if p['PrivatePort'] == 6311]
+    if len(rserve_ports) == 0:
+        raise werkzeug.exceptions.ServiceUnavailable('Container {} missconfigured'.format(container_name))
+
+    port = rserve_ports[0]
 
     conn = pyRserve.connect(host=host, port=port)
     model_predict = getattr(conn.r, 'model.predict')

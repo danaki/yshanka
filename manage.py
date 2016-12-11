@@ -11,7 +11,8 @@ manager.add_command('db', MigrateCommand)
 
 @manager.command
 def run():
-    socketio.run(app)
+    # restarting with reloader spawns duplicate eventlet threads, disable it here
+    socketio.run(app, use_reloader=False)
 
 @manager.command
 def seed():

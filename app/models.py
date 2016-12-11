@@ -2,7 +2,6 @@ import datetime
 from app.database import db
 from flask_security import Security, \
     UserMixin, RoleMixin, login_required, current_user
-from flask_admin.model.template import macro
 
 
 roles_users = db.Table(
@@ -40,7 +39,11 @@ class PredictiveModel(db.Model):
     active_build_id = db.Column(db.Integer, db.ForeignKey('build.id'))
 
     user = db.relationship("User", back_populates="predictive_models")
-    builds = db.relationship("Build", back_populates="predictive_model", foreign_keys='Build.predictive_model_id')
+    builds = db.relationship("Build",
+        back_populates="predictive_model",
+        foreign_keys='Build.predictive_model_id',
+        order_by="desc(Build.version)"
+        )
     active_build = db.relationship("Build", foreign_keys=[active_build_id])
 
     def __str__(self):
