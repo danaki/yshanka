@@ -94,7 +94,7 @@ class PredictiveModelView(AdminView):
         <span id="{container_name}-stats">
             <span class="badge cpu"></span>
             <span class="badge mem"></span>
-        </span>""".format(model_name=model.model_name, container_name=model.active_build.container_name))
+        </span>""".format(model_name=model.model_name, container_name=model.active_build.container_name if not model.active_build is None else ''))
 
     column_formatters = {
        'model_name': model_name_formatter
@@ -131,7 +131,7 @@ class PredictiveModelView(AdminView):
         current_build = build.predictive_model.active_build
         if (current_build):
             docker_client.stop(build.predictive_model.active_build.container_name)
-            
+
         build.predictive_model.active_build = build
 
         db.session.add(build.predictive_model)

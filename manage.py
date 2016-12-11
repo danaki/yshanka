@@ -23,6 +23,7 @@ def seed():
         username='admin',
         email='admin@example.com',
         password='admin',
+        apikey='adminadminadmin',
         roles=['superuser'])
 
     db.session.commit()

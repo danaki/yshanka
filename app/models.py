@@ -47,7 +47,7 @@ class PredictiveModel(db.Model):
     active_build = db.relationship("Build", foreign_keys=[active_build_id])
 
     def __str__(self):
-        return self.name
+        return self.model_name
 
 class Build(db.Model):
     id = db.Column(db.Integer, primary_key=True)
