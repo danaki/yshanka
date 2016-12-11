@@ -19,9 +19,9 @@ $ docker-machine start
 $ python manage.py run
 ```
 
-Go to http://localhost:5000/admin/login/
-Login: admin@example.com
-Password: admin
+* Go to http://localhost:5000/admin/login/
+* Login: admin@example.com
+* Password: admin
 
 
 
