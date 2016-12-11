@@ -52,6 +52,9 @@ model.predict <- function(request) {
 }
 
 yhat.deploy("HelloWorld", confirm = FALSE)
+# ... wait for container and model to start for the first time, you can monitor the process from
+# webserver debug output and admin web interface
+
 yhat.predict("HelloWorld", data.frame(name="yshanka!"))
 ```
 
