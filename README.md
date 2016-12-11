@@ -1,6 +1,16 @@
 `Yshanka`: Yhat ScienseOps poorman's drop-in replacement
 ========================================================
 
+At the moment:
+
+* Only R models (via Rserve)
+* No multiple workers (local docker)
+* No user permissions
+* Hackish and dirty code
+
+It's proof of concept. If you want me to continue development please say 'Hello' to pimenoff at gmail or via github messaging.
+
+
 Installation
 ----------------
 
