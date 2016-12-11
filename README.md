@@ -1,6 +1,16 @@
 `Yshanka`: Yhat ScienseOps poorman's drop-in replacement
 ========================================================
 
+At the moment:
+
+* Only R models (via Rserve)
+* No multiple workers (local docker)
+* No user permissions
+* Hackish and dirty code
+
+It's proof of concept. If you want me to continue development please say 'Hello' to pimenoff at gmail or via github messaging.
+
+
 Installation
 ----------------
 
@@ -15,8 +25,37 @@ Run
 ----------------
 
 ```
-$ R_HOME="/usr/lib/R" R_LIB="Rlib" /usr/lib/R/bin/Rserve --RS-conf Rserve.conf --RS-source code.R --vanilla
-$ python manage.py runserver
+$ docker-machine start
+$ python manage.py run
 ```
 
-To be continued...
+* Go to http://localhost:5000/admin/login/
+* Login: admin@example.com
+* Password: admin
+
+
+
+```r
+install.packages('yhatr')
+library(yhatr)
+
+yhat.config  <- c(
+  username="admin",
+  apikey="adminadminadmin",
+  env="http://localhost:5000"
+)
+
+model.predict <- function(request) {
+  me <- request$name
+  greeting <- paste ("Hello", me, "!")
+  greeting
+}
+
+yhat.deploy("HelloWorld", confirm = FALSE)
+# ... wait for container and model to start for the first time, you can monitor the process from
+# webserver debug output and admin web interface
+
+yhat.predict("HelloWorld", data.frame(name="yshanka!"))
+```
+
+
