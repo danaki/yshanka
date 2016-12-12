@@ -9,10 +9,11 @@ manager = Manager(app)
 #manager.add_command('runserver', Server())
 manager.add_command('db', MigrateCommand)
 
-@manager.command
-def run():
-    # restarting with reloader spawns duplicate eventlet threads, disable it here
-    socketio.run(app, use_reloader=False)
+@manager.option('-h', '--host', dest='host', default='127.0.0.1')
+@manager.option('-p', '--port', dest='port', default=5000)
+def run(host, port):
+    # restarting with reloader spawns duplicate eventlet5000 threads, disable reloader here
+    socketio.run(app, use_reloader=False, host=host, port=int(port))
 
 @manager.command
 def seed():
