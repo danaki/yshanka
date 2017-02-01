@@ -33,7 +33,8 @@ $ python manage.py run
 * Login: admin@example.com
 * Password: admin
 
-
+R
+----------------
 
 ```r
 install.packages('yhatr')
