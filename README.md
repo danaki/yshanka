@@ -8,7 +8,7 @@ At the moment:
 * No user permissions
 * Hackish and dirty code
 
-It's proof of concept. If you want me to continue development please say 'Hello' to pimenoff at gmail or via github messaging.
+It's proof of concept. If you want me to continue development please say 'Hello' to pimenoff at gmail or via messaging.
 
 
 Installation
@@ -57,5 +57,3 @@ yhat.deploy("HelloWorld", confirm = FALSE)
 
 yhat.predict("HelloWorld", data.frame(name="yshanka!"))
 ```
-
-
