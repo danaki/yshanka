@@ -17,6 +17,7 @@ Installation
 ```
 $ git clone ... ; cd ...
 $ conda env create -n yshanka
+$ source activate yshanka
 $ python manage.py db upgrade
 $ python manage.py seed
 ```
