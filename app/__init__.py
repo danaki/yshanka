@@ -214,7 +214,8 @@ def deployer_thread(image_name, container_name, model_file, deps):
         out = json.loads(line)
         if not 'stream' in out:
             app.logger.error(out)
-        app.logger.error(out['stream'].rstrip('\n'))
+        else:
+            app.logger.error(out['stream'].rstrip('\n'))
 
     container = docker_client.create_container(
         image_name,
