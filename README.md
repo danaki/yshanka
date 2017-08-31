@@ -8,7 +8,7 @@ At the moment:
 * No user permissions
 * Hackish and dirty code
 
-It's proof of concept. If you want me to continue development please say 'Hello' to pimenoff at gmail or via github messaging.
+It's proof of concept. If you want me to continue development please say 'Hello' to pimenoff at gmail or via messaging.
 
 
 Installation
@@ -17,6 +17,7 @@ Installation
 ```
 $ git clone ... ; cd ...
 $ conda env create -n yshanka
+$ source activate yshanka
 $ python manage.py db upgrade
 $ python manage.py seed
 ```
@@ -33,7 +34,8 @@ $ python manage.py run
 * Login: admin@example.com
 * Password: admin
 
-
+R
+----------------
 
 ```r
 install.packages('yhatr')
@@ -57,5 +59,3 @@ yhat.deploy("HelloWorld", confirm = FALSE)
 
 yhat.predict("HelloWorld", data.frame(name="yshanka!"))
 ```
-
-

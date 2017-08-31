@@ -1,5 +1,10 @@
 name: yshanka
+
+channels:
+  - conda-forge
+
 dependencies:
+  - python=2.7
   - flask
   - sqlalchemy
   - marshmallow-sqlalchemy

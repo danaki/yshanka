@@ -31,6 +31,9 @@ from app.views import *
 from app.docker_client import *
 
 
+# XXX: https://github.com/eventlet/eventlet/issues/401
+eventlet.sleep()
+
 eventlet.monkey_patch()
 
 APP_ROOT = os.path.dirname(os.path.abspath(__file__))
