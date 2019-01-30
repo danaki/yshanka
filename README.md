@@ -1,4 +1,4 @@
-`Yshanka`: Yhat ScienseOps poorman's drop-in replacement
+`Yshanka`: Yhat Science Ops drop-in replacement proof of concept
 ========================================================
 
 At the moment:
